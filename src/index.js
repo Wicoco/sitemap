@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { SitemapParser } from './parser.js';
 import { SitemapValidator } from './validator.js';
 import { SitemapGenerator } from './generator.js';
+import { URLChecker } from './checker.js';
 import { FileUtils, Logger, ConfigManager } from './utils.js';
 
 class SitemapCLI {
@@ -12,6 +13,7 @@ class SitemapCLI {
     this.parser = new SitemapParser();
     this.validator = new SitemapValidator();
     this.generator = new SitemapGenerator();
+    this.checker = new URLChecker();
   }
 
   async run() {
@@ -30,6 +32,9 @@ class SitemapCLI {
       .option('--no-priority', 'Exclure les priorités du sitemap')
       .option('--no-validate', 'Ignorer la validation')
       .option('--minify', 'Générer un XML minifié')
+      .option('--check-urls', 'Vérifier les URLs après génération')
+      .option('--concurrent <number>', 'Nombre de connexions simultanées pour vérification', '10')
+      .option('--timeout <number>', 'Timeout par requête en ms', '5000')
       .action(async (options) => {
         try {
           await this.generateSitemap(options);
@@ -64,6 +69,23 @@ class SitemapCLI {
       .action(async (options) => {
         try {
           await this.parseOnly(options);
+        } catch (error) {
+          console.error(chalk.red(`❌ Erreur: ${error.message}`));
+          process.exit(1);
+        }
+      });
+
+    // Commande check (NOUVELLE)
+    program
+      .command('check')
+      .description('Vérifie les URLs pour détecter les erreurs 404')
+      .option('-i, --input <file>', 'Fichier d\'entrée contenant les URLs')
+      .option('-s, --sitemap <file>', 'Fichier sitemap XML à vérifier')
+      .option('--concurrent <number>', 'Nombre de connexions simultanées', '10')
+      .option('--timeout <number>', 'Timeout par requête en ms', '5000')
+      .action(async (options) => {
+        try {
+          await this.checkUrls(options);
         } catch (error) {
           console.error(chalk.red(`❌ Erreur: ${error.message}`));
           process.exit(1);
@@ -107,7 +129,27 @@ class SitemapCLI {
     const stats = this.generator.generateReport(urls, xml);
     Logger.printStats(stats);
 
-    console.log(chalk.green.bold('\n🎉 Sitemap généré avec succès!'));
+    // Vérification URLs si demandée
+    if (options.checkUrls) {
+      const checkerOptions = {
+        concurrent: parseInt(options.concurrent) || 10,
+        timeout: parseInt(options.timeout) || 5000
+      };
+      this.checker = new URLChecker(checkerOptions);
+      const checkResults = await this.checker.checkUrls(urls, checkerOptions);
+      const report = this.checker.printReport(checkResults);
+      
+      if (report.success) {
+        console.log(chalk.green.bold('\n🎉 Sitemap généré avec succès!'));
+        console.log(chalk.green('✅ Toutes les URLs sont accessibles!'));
+      } else {
+        console.log(chalk.yellow.bold('\n⚠️  Sitemap généré avec avertissements'));
+        console.log(chalk.yellow(`⚠️  ${report.errorPercent.toFixed(1)}% d'erreurs détectées`));
+        // Ne pas faire process.exit ici, juste un avertissement
+      }
+    } else {
+      console.log(chalk.green.bold('\n🎉 Sitemap généré avec succès!'));
+    }
   }
 
   async validateOnly(options) {
@@ -177,6 +219,71 @@ class SitemapCLI {
         console.log(`  ${format}: ${chalk.yellow(count)} URLs`);
       });
     }
+  }
+
+  // NOUVELLE MÉTHODE checkUrls
+  async checkUrls(options) {
+    if (!options.input && !options.sitemap) {
+      throw new Error('Vous devez spécifier soit --input soit --sitemap');
+    }
+
+    let urls = [];
+
+    if (options.sitemap) {
+      // Parser un sitemap XML existant
+      console.log(chalk.cyan.bold('🔍 VÉRIFICATION SITEMAP XML'));
+      console.log(chalk.cyan('═'.repeat(50)));
+      
+      const content = await FileUtils.readInputFile(options.sitemap);
+      urls = this.parseSitemapXML(content);
+    } else {
+      // Parser le fichier d'URLs
+      console.log(chalk.cyan.bold('🔍 VÉRIFICATION FICHIER URLs'));
+      console.log(chalk.cyan('═'.repeat(50)));
+      
+      const content = await FileUtils.readInputFile(options.input);
+      const parseResult = this.parser.parse(content);
+      urls = parseResult.urls;
+    }
+
+    if (urls.length === 0) {
+      throw new Error('Aucune URL trouvée à vérifier');
+    }
+
+    // Configuration du checker
+    const checkerOptions = {
+      concurrent: parseInt(options.concurrent) || 10,
+      timeout: parseInt(options.timeout) || 5000
+    };
+
+    this.checker = new URLChecker(checkerOptions);
+    const checkResults = await this.checker.checkUrls(urls, checkerOptions);
+    const report = this.checker.printReport(checkResults);
+
+    // Code de sortie approprié
+    if (report.success) {
+      console.log(chalk.green.bold('\n✅ Vérification terminée avec succès!'));
+      process.exit(0);
+    } else {
+      console.log(chalk.red.bold('\n❌ Des erreurs ont été détectées!'));
+      process.exit(1);
+    }
+  }
+
+  // Méthode pour parser un sitemap XML
+  parseSitemapXML(content) {
+    const urls = [];
+    const urlMatches = content.match(/<loc>(.*?)<\/loc>/g);
+    
+    if (urlMatches) {
+      urlMatches.forEach(match => {
+        const url = match.replace(/<loc>|<\/loc>/g, '').trim();
+        urls.push({ url });
+      });
+    }
+    
+    console.log(chalk.green(`✅ ${urls.length} URLs extraites du sitemap XML`));
+    return urls;
   }
 }
 

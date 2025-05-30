@@ -1,18 +1,24 @@
 {
   "name": "sitemap-xml-generator",
   "version": "1.0.0",
-  "description": "Générateur de sitemap XML conforme aux standards avec parsing regex",
+  "description": "Générateur de sitemap XML conforme aux standards avec parsing regex et vérification 404",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/index.js generate",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/",
-    "validate": "node src/index.js --validate-only",
-    "parse": "node src/index.js --input data/urls.txt --output output/sitemap.xml"
-  },
-  "bin": {
-    "sitemap-gen": "src/index.js"
+    "build": "node src/index.js generate -i data/urls.txt -o output/sitemap.xml",
+    "validate": "node src/index.js validate -i data/urls.txt",
+    "parse": "node src/index.js parse -i data/urls.txt --limit 10",
+    "check": "node src/index.js check -i data/urls.txt",
+    "check-sitemap": "node src/index.js check -s output/sitemap.xml",
+    "full-build": "node src/index.js generate -i data/urls.txt -o output/sitemap.xml --check-urls",
+    "quick-check": "node src/index.js check -i data/urls.txt --concurrent 20",
+    "format": "prettier --write src/**/*.js",
+    "check-slow": "node src/index.js check -i data/urls.txt --concurrent 5 --timeout 10000",
+    "check-conservative": "node src/index.js check -i data/urls.txt --concurrent 3 --timeout 15000",
+    "lint": "prettier --check src/**/*.js"
   },
   "dependencies": {
     "commander": "^11.1.0",
@@ -22,5 +28,5 @@
   },
   "devDependencies": {
     "prettier": "^3.1.0"
-  } 
+    } 
 }
